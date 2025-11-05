@@ -10,7 +10,6 @@ from app.models.conversation import Conversation, Message
 from app.models.user import User
 from app.schemas.conversation import ConversationCreate, MessageCreate
 from app.services.openai_service import OpenAIService
-from app.services.crisis_detection import CrisisDetectionService
 from app.core.config import settings
 
 
@@ -21,11 +20,9 @@ class ConversationService:
         self,
         db: AsyncSession,
         openai_service: OpenAIService,
-        crisis_service: CrisisDetectionService,
     ):
         self.db = db
         self.openai_service = openai_service
-        self.crisis_service = crisis_service
 
     async def create_conversation(
         self, user_id: UUID, title: Optional[str] = None
@@ -70,34 +67,31 @@ class ConversationService:
         role: str,
         content: str,
         embedding: Optional[List[float]] = None,
+        crisis_keywords: Optional[List[str]] = None,
     ) -> Message:
-        """Add a message to a conversation"""
-        # Detect crisis keywords
-        is_crisis, severity, keywords = self.crisis_service.detect_crisis(content)
+        """
+        Add a message to a conversation.
 
+        Args:
+            conversation_id: Conversation UUID
+            role: Message role (user, assistant, system)
+            content: Message content
+            embedding: Optional embedding vector
+            crisis_keywords: Optional list of detected crisis keywords
+
+        Returns:
+            Created message
+        """
         message = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
             embedding=embedding,
-            contains_crisis_keywords=is_crisis,
-            detected_keywords=keywords if keywords else None,
+            contains_crisis_keywords=bool(crisis_keywords),
+            detected_keywords=crisis_keywords,
         )
 
         self.db.add(message)
-
-        # Update conversation if crisis detected
-        if is_crisis:
-            conversation = await self.db.get(Conversation, conversation_id)
-            if conversation:
-                conversation.crisis_detected = True
-                conversation.crisis_severity = max(
-                    conversation.crisis_severity, severity
-                )
-                if not conversation.crisis_keywords_found:
-                    conversation.crisis_keywords_found = []
-                conversation.crisis_keywords_found.extend(keywords)
-
         await self.db.commit()
         await self.db.refresh(message)
         return message

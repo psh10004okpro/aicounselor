@@ -1,4 +1,4 @@
-"""Chat API endpoints with streaming support"""
+"""Chat API endpoints with advanced crisis detection"""
 
 from typing import Optional
 from uuid import UUID
@@ -10,8 +10,9 @@ from app.core.database import get_db
 from app.core.redis import RedisManager, get_redis
 from app.schemas.conversation import ChatRequest, ChatResponse, StreamChunk
 from app.services.openai_service import OpenAIService
-from app.services.crisis_detection import CrisisDetectionService
+from app.services.crisis_detector import crisis_detection_system, RiskLevel
 from app.services.conversation_service import ConversationService
+from app.services.cache_service import CacheService
 from app.models.user import User
 import json
 
@@ -61,8 +62,24 @@ async def send_message(
 
     # Initialize services
     openai_service = OpenAIService()
-    crisis_service = CrisisDetectionService()
-    conversation_service = ConversationService(db, openai_service, crisis_service)
+    cache_service = CacheService(redis)
+    conversation_service = ConversationService(db, openai_service)
+
+    # Rate limiting check (10 requests per minute)
+    rate_limit_key = f"user:{user.id}"
+    is_allowed, rate_info = await cache_service.rate_limit_per_minute(
+        rate_limit_key, max_requests=10
+    )
+
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "message": "Rate limit exceeded. Please try again later.",
+                "requests_remaining": rate_info["requests_remaining"],
+                "reset_time": rate_info["reset_time"],
+            },
+        )
 
     # Get or create conversation
     if request.conversation_id:
@@ -91,38 +108,41 @@ async def send_message(
         embedding=user_embedding,
     )
 
-    # Check for crisis
-    is_crisis, severity, keywords = crisis_service.detect_crisis(request.message)
+    # Get conversation context for crisis detection
+    context = await conversation_service.get_conversation_context(conversation.id)
 
-    if is_crisis:
-        # Log crisis event
-        await crisis_service.log_crisis_event(
+    # Advanced 3-stage crisis detection
+    assessment = await crisis_detection_system.detect(
+        message=request.message,
+        conversation_history=context
+    )
+
+    # Handle crisis detection
+    if assessment["risk_level"] in [RiskLevel.CRITICAL, RiskLevel.HIGH]:
+        # Log crisis event to database
+        await crisis_detection_system.emergency_protocol(
+            assessment=assessment,
             user_id=str(user.id),
-            conversation_id=str(conversation.id),
-            message=request.message,
-            severity=severity,
-            keywords=keywords,
+            conversation_id=str(conversation.id)
         )
 
-        # Get crisis response
-        crisis_response = crisis_service.get_crisis_response(severity)
+        # Get appropriate crisis response message
+        crisis_response = crisis_detection_system.get_crisis_response_message(assessment)
 
-        # Add crisis response message
+        # Add crisis response message with detected keywords
         assistant_message = await conversation_service.add_message(
             conversation_id=conversation.id,
             role="assistant",
             content=crisis_response,
+            crisis_keywords=assessment.get("detected_keywords", []),
         )
 
         return ChatResponse(
             conversation_id=conversation.id,
             message=assistant_message,
             crisis_detected=True,
-            crisis_severity=severity,
+            crisis_severity=assessment["risk_level"].value,
         )
-
-    # Get conversation context
-    context = await conversation_service.get_conversation_context(conversation.id)
 
     # Add system prompt
     system_prompt = openai_service._build_system_prompt()
@@ -180,10 +200,22 @@ async def stream_message(
 
             # Initialize services
             openai_service = OpenAIService()
-            crisis_service = CrisisDetectionService()
-            conversation_service = ConversationService(
-                db, openai_service, crisis_service
+            cache_service = CacheService(redis)
+            conversation_service = ConversationService(db, openai_service)
+
+            # Rate limiting check (10 requests per minute)
+            rate_limit_key = f"user:{user.id}"
+            is_allowed, rate_info = await cache_service.rate_limit_per_minute(
+                rate_limit_key, max_requests=10
             )
+
+            if not is_allowed:
+                error_chunk = StreamChunk(
+                    content=f"Rate limit exceeded. Please try again in {rate_info['reset_time']} seconds.",
+                    done=True
+                )
+                yield f"data: {error_chunk.model_dump_json()}\n\n"
+                return
 
             # Get or create conversation
             if request.conversation_id:
@@ -191,10 +223,12 @@ async def stream_message(
                     request.conversation_id, user.id
                 )
                 if not conversation:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Conversation not found",
+                    error_chunk = StreamChunk(
+                        content="Conversation not found",
+                        done=True
                     )
+                    yield f"data: {error_chunk.model_dump_json()}\n\n"
+                    return
             else:
                 title = await openai_service.generate_conversation_title(
                     request.message
@@ -214,23 +248,28 @@ async def stream_message(
                 embedding=user_embedding,
             )
 
-            # Check for crisis
-            is_crisis, severity, keywords = crisis_service.detect_crisis(
-                request.message
+            # Get conversation context for crisis detection
+            context = await conversation_service.get_conversation_context(
+                conversation.id
             )
 
-            if is_crisis:
-                # Log crisis event
-                await crisis_service.log_crisis_event(
+            # Advanced 3-stage crisis detection
+            assessment = await crisis_detection_system.detect(
+                message=request.message,
+                conversation_history=context
+            )
+
+            # Handle crisis detection
+            if assessment["risk_level"] in [RiskLevel.CRITICAL, RiskLevel.HIGH]:
+                # Log crisis event to database
+                await crisis_detection_system.emergency_protocol(
+                    assessment=assessment,
                     user_id=str(user.id),
-                    conversation_id=str(conversation.id),
-                    message=request.message,
-                    severity=severity,
-                    keywords=keywords,
+                    conversation_id=str(conversation.id)
                 )
 
-                # Send crisis response
-                crisis_response = crisis_service.get_crisis_response(severity)
+                # Get appropriate crisis response message
+                crisis_response = crisis_detection_system.get_crisis_response_message(assessment)
 
                 # Stream crisis response character by character
                 for char in crisis_response:
@@ -241,11 +280,12 @@ async def stream_message(
                     )
                     yield f"data: {chunk.model_dump_json()}\n\n"
 
-                # Add crisis response to database
+                # Add crisis response to database with detected keywords
                 await conversation_service.add_message(
                     conversation_id=conversation.id,
                     role="assistant",
                     content=crisis_response,
+                    crisis_keywords=assessment.get("detected_keywords", []),
                 )
 
                 # Send done signal
@@ -257,11 +297,6 @@ async def stream_message(
                 )
                 yield f"data: {done_chunk.model_dump_json()}\n\n"
                 return
-
-            # Get conversation context
-            context = await conversation_service.get_conversation_context(
-                conversation.id
-            )
 
             # Add system prompt
             system_prompt = openai_service._build_system_prompt()
