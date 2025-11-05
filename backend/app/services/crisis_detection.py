@@ -1,21 +1,57 @@
-"""Crisis detection service for identifying high-risk situations"""
+"""Crisis detection service for identifying high-risk situations (Korea-specific)"""
 
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from datetime import datetime
 
 from app.core.config import settings
 
 
 class CrisisDetectionService:
-    """Service for detecting crisis situations in user messages"""
+    """Service for detecting crisis situations in user messages (Korea-specific)"""
 
     def __init__(self):
-        self.crisis_keywords = settings.CRISIS_KEYWORDS
+        # Korean crisis keywords
+        self.crisis_keywords_ko = [
+            "죽고싶",
+            "자살",
+            "자해",
+            "목숨",
+            "극단적",
+            "살고싶지",
+            "사라지고싶",
+            "끝내고싶",
+            "죽을까",
+            "죽어야",
+            "생을 마감",
+            "더이상 못",
+            "한계",
+            "견딜 수 없",
+        ]
+
+        # English crisis keywords (for international users)
+        self.crisis_keywords_en = [
+            "suicide",
+            "kill myself",
+            "end my life",
+            "self-harm",
+            "hurt myself",
+            "don't want to live",
+        ]
+
         self.threshold = settings.CRISIS_KEYWORDS_THRESHOLD
 
-        # Extended crisis patterns (regex)
-        self.crisis_patterns = [
+        # Korean crisis patterns (regex)
+        self.crisis_patterns_ko = [
+            r"(죽|자살|자해).*?(싶|하고|할|해야)",
+            r"(극단적|살고싶지|사라지고싶).*?(선택|생각)",
+            r"(더이상|이제|정말).*?(못|안|힘들|버티|견디)",
+            r"(생|삶|인생|목숨).*?(마감|끝|포기)",
+            r"(세상|세상에|이 세상).*?(없|사라|떠나)",
+        ]
+
+        # English crisis patterns
+        self.crisis_patterns_en = [
             r"\b(want to die|wanna die|wish I was dead)\b",
             r"\b(kill myself|end my life|take my life)\b",
             r"\b(suicide|suicidal)\b",
@@ -27,7 +63,7 @@ class CrisisDetectionService:
 
     def detect_crisis(self, text: str) -> Tuple[bool, int, List[str]]:
         """
-        Detect crisis indicators in text.
+        Detect crisis indicators in text (multilingual).
 
         Args:
             text: User message text
@@ -38,24 +74,39 @@ class CrisisDetectionService:
             - severity: Severity score (0-10)
             - detected_keywords: List of detected crisis keywords/patterns
         """
-        text_lower = text.lower()
         detected = []
         severity = 0
 
-        # Check for exact keyword matches
-        for keyword in self.crisis_keywords:
+        # Check Korean keywords
+        for keyword in self.crisis_keywords_ko:
+            if keyword in text:
+                detected.append(keyword)
+                severity += 1
+
+        # Check English keywords
+        text_lower = text.lower()
+        for keyword in self.crisis_keywords_en:
             if keyword in text_lower:
                 detected.append(keyword)
                 severity += 1
 
-        # Check for crisis patterns (more severe)
-        for pattern in self.crisis_patterns:
-            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+        # Check Korean crisis patterns (more severe)
+        for pattern in self.crisis_patterns_ko:
+            matches = re.findall(pattern, text, re.IGNORECASE)
             if matches:
                 for match in matches:
                     if match not in detected:
                         detected.append(match)
                         severity += 2  # Patterns are weighted more heavily
+
+        # Check English crisis patterns
+        for pattern in self.crisis_patterns_en:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    if match not in detected:
+                        detected.append(match)
+                        severity += 2
 
         # Normalize severity to 0-10 scale
         severity = min(severity, 10)
@@ -67,42 +118,44 @@ class CrisisDetectionService:
 
     def get_crisis_response(self, severity: int) -> str:
         """
-        Get appropriate crisis response based on severity.
+        Get appropriate crisis response based on severity (Korea-specific).
 
         Args:
             severity: Crisis severity score (0-10)
 
         Returns:
-            Crisis response message
+            Crisis response message in Korean
         """
         if severity >= 7:
-            return """I'm very concerned about what you've shared. Your safety is the top priority right now.
+            return """지금 공유해주신 내용이 매우 걱정됩니다. 당신의 안전이 가장 중요합니다.
 
-**Please reach out for immediate help:**
-- 🆘 National Suicide Prevention Lifeline: 988 (call or text)
-- 📱 Crisis Text Line: Text HOME to 741741
-- 🌐 International Association for Suicide Prevention: https://www.iasp.info/resources/Crisis_Centres/
+**즉시 전문적인 도움을 받아주세요:**
+- 🆘 자살예방상담전화: **1393** (24시간 상담 가능)
+- 📱 생명의 전화: **1588-9191** (24시간 상담 가능)
+- 💬 정신건강위기상담전화: **1577-0199** (24시간 상담 가능)
+- 🏥 응급상황: **119** (즉시 연락)
 
-If you're in immediate danger, please call 911 or go to your nearest emergency room.
+**지금 당장 위험한 상황이라면 119에 전화하거나 가까운 응급실로 가주세요.**
 
-I'm here to listen, but I want to make sure you have access to professional crisis support right now."""
+제가 여기서 들을 수는 있지만, 지금은 전문가의 도움이 꼭 필요한 상황입니다. 당신은 혼자가 아닙니다."""
 
         elif severity >= 4:
-            return """I hear that you're going through a really difficult time. While I'm here to support you, I want to make sure you have access to professional help:
+            return """정말 힘든 시간을 보내고 계신 것 같아 마음이 아픕니다. 제가 이야기를 들을 수는 있지만, 전문적인 도움도 함께 받으시면 좋을 것 같습니다.
 
-**Crisis Resources:**
-- 988 Suicide & Crisis Lifeline (24/7)
-- Crisis Text Line: Text HOME to 741741
+**위기 상담 자원:**
+- 📞 자살예방상담전화: **1393** (24시간)
+- 📞 생명의 전화: **1588-9191** (24시간)
+- 📞 정신건강위기상담전화: **1577-0199** (24시간)
 
-Would you like to talk more about what's troubling you? Remember, it's okay to reach out for professional support."""
+지금 무엇이 가장 힘드신지 더 이야기해주시겠어요? 전문가의 도움을 받는 것은 결코 약한 모습이 아닙니다."""
 
         else:
-            return """Thank you for sharing that with me. I'm here to listen. If things ever feel overwhelming, please know that help is available:
+            return """힘든 마음을 나눠주셔서 감사합니다. 제가 여기서 들을 준비가 되어 있습니다. 만약 감당하기 어려워지면, 언제든지 도움을 요청할 수 있다는 것을 기억해주세요:
 
-- 988 Suicide & Crisis Lifeline (24/7)
-- Crisis Text Line: Text HOME to 741741
+- 📞 자살예방상담전화: **1393** (24시간)
+- 📞 생명의 전화: **1588-9191** (24시간)
 
-What would be most helpful for you to talk about right now?"""
+지금 무엇에 대해 이야기를 나누면 가장 도움이 될까요?"""
 
     async def log_crisis_event(
         self,

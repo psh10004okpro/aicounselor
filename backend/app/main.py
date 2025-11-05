@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.redis import redis_manager
-from app.api import chat
+from app.api import chat, auth
 
 
 @asynccontextmanager
@@ -82,6 +82,7 @@ async def root():
 
 
 # Include routers
+app.include_router(auth.router)
 app.include_router(chat.router)
 
 
