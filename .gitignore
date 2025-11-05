@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 
 # Python
 __pycache__/
@@ -31,6 +33,14 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.tox/
+.nox/
+*.cover
+.hypothesis/
+
+# Alembic (Database migrations)
+# Uncomment if you want to ignore migration versions
+# backend/alembic/versions/*.py
 
 # Node
 node_modules/
@@ -38,12 +48,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+package-lock.json
+yarn.lock
 
 # Next.js
 .next/
 out/
 next-env.d.ts
 *.tsbuildinfo
+.turbo/
 
 # IDE
 .vscode/
@@ -52,6 +65,7 @@ next-env.d.ts
 *.swo
 *~
 .DS_Store
+*.iml
 
 # Docker
 .dockerignore
@@ -59,14 +73,47 @@ next-env.d.ts
 # Logs
 *.log
 logs/
+*.log.*
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+pgdata/
 
 # Redis
 dump.rdb
+appendonly.aof
 
 # OS
 Thumbs.db
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+.cache/
+
+# Test artifacts
+test-results/
+*.test-results.xml
+coverage/
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+*.p12
+credentials.json
+secrets/
+
+# Local development
+.local/
+local_*
+dev_data/
