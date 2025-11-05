@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.redis import redis_manager
+from app.services.cache_service import CacheService
 from app.api import chat, auth
 
 
@@ -24,6 +25,12 @@ async def lifespan(app: FastAPI):
     # Initialize Redis
     print("🔴 Connecting to Redis...")
     await redis_manager.connect()
+
+    # Initialize FAQ cache
+    print("💬 Initializing FAQ cache...")
+    cache_service = CacheService(redis_manager)
+    faq_count = await cache_service.initialize_faq_cache()
+    print(f"✅ Cached {faq_count} FAQs")
 
     print("✅ Application started successfully!")
 

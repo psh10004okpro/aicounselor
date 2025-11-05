@@ -1,19 +1,26 @@
 """OpenAI API integration service"""
 
-from typing import List, AsyncGenerator
+from typing import List, AsyncGenerator, Optional
 from openai import AsyncOpenAI
 import hashlib
 
 from app.core.config import settings
 from app.core.redis import RedisManager
+from app.services.cache_service import CacheService
+
+
+# Pricing per 1M tokens (USD) for GPT-4o-mini
+GPT4O_MINI_INPUT_PRICE = 0.15  # $0.15 per 1M input tokens
+GPT4O_MINI_OUTPUT_PRICE = 0.60  # $0.60 per 1M output tokens
 
 
 class OpenAIService:
     """Service for OpenAI API interactions with semantic caching"""
 
-    def __init__(self):
+    def __init__(self, cache_service: Optional[CacheService] = None):
         self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = settings.OPENAI_MODEL
+        self.cache_service = cache_service
 
     async def create_embedding(self, text: str) -> List[float]:
         """
@@ -35,29 +42,55 @@ class OpenAIService:
         messages: List[dict[str, str]],
         redis_manager: RedisManager,
         stream: bool = False,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None] | str:
         """
-        Generate chat completion with semantic caching.
+        Generate chat completion with FAQ checking, semantic caching, and usage tracking.
 
         Args:
             messages: Chat messages
             redis_manager: Redis manager for caching
             stream: Whether to stream response
+            user_id: User identifier for usage tracking
 
         Yields/Returns:
             Response chunks if streaming, complete response otherwise
         """
+        # Get last user message
+        last_message = messages[-1]["content"]
+
+        # Step 1: Check FAQ cache first (for common questions)
+        if self.cache_service:
+            faq_response = await self.cache_service.get_faq_response(last_message)
+            if faq_response:
+                # Track cache hit
+                await self.cache_service.track_cache_hit()
+
+                # Return FAQ answer
+                faq_answer = faq_response["answer"]
+
+                if stream:
+                    # Simulate streaming for FAQ response
+                    for char in faq_answer:
+                        yield char
+                else:
+                    yield faq_answer
+                return
+
         # Create cache key from messages
         cache_key = self._create_cache_key(messages)
 
         # Get query embedding for semantic search
-        last_message = messages[-1]["content"]
         query_embedding = await self.create_embedding(last_message)
 
-        # Check semantic cache
+        # Step 2: Check semantic cache
         cached_result = await redis_manager.semantic_cache_search(query_embedding)
 
         if cached_result:
+            # Track cache hit
+            if self.cache_service:
+                await self.cache_service.track_cache_hit()
+
             # Return cached response
             cached_response = cached_result["response"]["content"]
 
@@ -69,7 +102,11 @@ class OpenAIService:
                 yield cached_response
             return
 
-        # Generate new response
+        # Step 3: Track cache miss (going to OpenAI API)
+        if self.cache_service:
+            await self.cache_service.track_cache_miss()
+
+        # Generate new response from OpenAI
         if stream:
             response_content = ""
             stream_response = await self.client.chat.completions.create(
@@ -86,11 +123,14 @@ class OpenAIService:
                     response_content += content
                     yield content
 
-            # Cache the complete response
-            await redis_manager.semantic_cache_set(
-                query_id=cache_key,
+            # Track usage and cache the response
+            await self._track_usage_and_cache(
+                messages=messages,
+                response_content=response_content,
+                cache_key=cache_key,
                 query_embedding=query_embedding,
-                response={"content": response_content},
+                redis_manager=redis_manager,
+                user_id=user_id,
             )
 
         else:
@@ -102,6 +142,23 @@ class OpenAIService:
             )
 
             response_content = response.choices[0].message.content
+
+            # Track usage with actual token counts
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+
+            # Calculate cost
+            cost = self._calculate_cost(input_tokens, output_tokens)
+
+            # Track usage
+            if self.cache_service and user_id:
+                await self.cache_service.track_usage(
+                    user_id=user_id,
+                    tokens=total_tokens,
+                    cost=cost,
+                    model=self.model,
+                )
 
             # Cache the response
             await redis_manager.semantic_cache_set(
@@ -140,6 +197,82 @@ class OpenAIService:
         """Create a unique cache key from messages"""
         content = "".join([m["content"] for m in messages])
         return hashlib.sha256(content.encode()).hexdigest()
+
+    def _calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """
+        Calculate cost in USD based on token counts.
+
+        Args:
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+
+        Returns:
+            Cost in USD
+        """
+        input_cost = (input_tokens / 1_000_000) * GPT4O_MINI_INPUT_PRICE
+        output_cost = (output_tokens / 1_000_000) * GPT4O_MINI_OUTPUT_PRICE
+        return input_cost + output_cost
+
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        Estimate token count for text (rough approximation).
+        For accurate counts, use tiktoken library.
+
+        Args:
+            text: Input text
+
+        Returns:
+            Estimated token count
+        """
+        # Rough estimate: 1 token ≈ 4 characters for English
+        # For Korean, it's roughly 1 token ≈ 2-3 characters
+        # Using conservative estimate of 3 characters per token
+        return len(text) // 3
+
+    async def _track_usage_and_cache(
+        self,
+        messages: List[dict[str, str]],
+        response_content: str,
+        cache_key: str,
+        query_embedding: List[float],
+        redis_manager: RedisManager,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """
+        Track usage and cache the response (for streaming mode).
+
+        Args:
+            messages: Chat messages
+            response_content: Generated response
+            cache_key: Cache key
+            query_embedding: Query embedding
+            redis_manager: Redis manager
+            user_id: User identifier
+        """
+        # Estimate token counts (streaming mode doesn't provide usage stats)
+        input_text = "".join([m["content"] for m in messages])
+        input_tokens = self._estimate_tokens(input_text)
+        output_tokens = self._estimate_tokens(response_content)
+        total_tokens = input_tokens + output_tokens
+
+        # Calculate cost
+        cost = self._calculate_cost(input_tokens, output_tokens)
+
+        # Track usage
+        if self.cache_service and user_id:
+            await self.cache_service.track_usage(
+                user_id=user_id,
+                tokens=total_tokens,
+                cost=cost,
+                model=self.model,
+            )
+
+        # Cache the response
+        await redis_manager.semantic_cache_set(
+            query_id=cache_key,
+            query_embedding=query_embedding,
+            response={"content": response_content},
+        )
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt for the counseling AI (마음이 - Korea-specific)"""

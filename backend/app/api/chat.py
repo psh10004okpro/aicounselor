@@ -61,8 +61,8 @@ async def send_message(
     user = await get_current_user(session_token, db)
 
     # Initialize services
-    openai_service = OpenAIService()
     cache_service = CacheService(redis)
+    openai_service = OpenAIService(cache_service=cache_service)
     conversation_service = ConversationService(db, openai_service)
 
     # Rate limiting check (10 requests per minute)
@@ -150,7 +150,7 @@ async def send_message(
 
     # Get AI response (non-streaming)
     response_generator = openai_service.chat_completion(
-        messages=messages, redis_manager=redis, stream=False
+        messages=messages, redis_manager=redis, stream=False, user_id=str(user.id)
     )
 
     # Get complete response
@@ -199,8 +199,8 @@ async def stream_message(
             user = await get_current_user(session_token, db)
 
             # Initialize services
-            openai_service = OpenAIService()
             cache_service = CacheService(redis)
+            openai_service = OpenAIService(cache_service=cache_service)
             conversation_service = ConversationService(db, openai_service)
 
             # Rate limiting check (10 requests per minute)
@@ -305,7 +305,7 @@ async def stream_message(
             # Stream AI response
             complete_response = ""
             async for chunk in openai_service.chat_completion(
-                messages=messages, redis_manager=redis, stream=True
+                messages=messages, redis_manager=redis, stream=True, user_id=str(user.id)
             ):
                 complete_response += chunk
                 stream_chunk = StreamChunk(
