@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.redis import redis_manager
 from app.services.cache_service import CacheService
-from app.api import chat, auth, cbt_stages, crisis_assessment
+from app.api import chat, auth, cbt_stages, crisis_assessment, age_counseling
 from middleware.security import (
     SecurityHeadersMiddleware,
     SQLInjectionProtectionMiddleware,
@@ -124,6 +124,7 @@ app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(cbt_stages.router)
 app.include_router(crisis_assessment.router)
+app.include_router(age_counseling.router)
 
 
 # Global exception handler
