@@ -5,6 +5,7 @@ import { Message } from '@/lib/api'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
 import CrisisAlert from './CrisisAlert'
+import ConsentModal from './ConsentModal'
 import {
   streamChatMessage,
   getSessionToken,
@@ -16,6 +17,7 @@ import {
 type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'none'
 
 export default function ChatInterface() {
+  const [consentGiven, setConsentGiven] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [sessionToken, setSessionToken] = useState<string>('')
@@ -123,9 +125,17 @@ export default function ChatInterface() {
     clearConversation()
   }
 
+  const handleConsent = (given: boolean) => {
+    setConsentGiven(given)
+  }
+
   return (
-    <div className="flex flex-col h-[600px] bg-white rounded-lg shadow-xl overflow-hidden">
-      {/* Header */}
+    <>
+      {/* Consent Modal */}
+      <ConsentModal onConsent={handleConsent} />
+
+      <div className="flex flex-col h-[600px] bg-white rounded-lg shadow-xl overflow-hidden">
+        {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-counselor-main text-white">
         <div>
           <h2 className="text-xl font-semibold">마음이와 대화</h2>
@@ -185,12 +195,13 @@ export default function ChatInterface() {
         disabled={isLoading || !sessionToken}
       />
 
-      {/* Loading session indicator */}
-      {!sessionToken && (
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-100 text-blue-800 px-4 py-2 rounded-lg text-sm">
-          세션을 초기화하는 중...
-        </div>
-      )}
-    </div>
+        {/* Loading session indicator */}
+        {!sessionToken && (
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-100 text-blue-800 px-4 py-2 rounded-lg text-sm">
+            세션을 초기화하는 중...
+          </div>
+        )}
+      </div>
+    </>
   )
 }
