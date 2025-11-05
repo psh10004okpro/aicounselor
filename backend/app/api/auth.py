@@ -1,15 +1,20 @@
 """Authentication API endpoints"""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr
+from typing import Optional
 
 from app.core.database import get_db
+from app.core.redis import RedisManager, get_redis
 from app.utils.auth import (
     create_anonymous_user,
     register_user,
     login_user,
     refresh_access_token,
+    revoke_token,
+    revoke_all_user_tokens,
+    get_current_user_from_token,
 )
 from app.schemas.user import UserResponse
 
@@ -113,12 +118,82 @@ async def login(request: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=RefreshResponse)
-async def refresh(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh(
+    request: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: RedisManager = Depends(get_redis),
+):
     """
     Refresh access token using refresh token.
 
     This allows extending user session without re-login.
     """
-    access_token = await refresh_access_token(request.refresh_token, db)
+    access_token = await refresh_access_token(request.refresh_token, db, redis)
 
     return RefreshResponse(access_token=access_token)
+
+
+@router.post("/logout")
+async def logout(
+    authorization: Optional[str] = Header(None),
+    redis: RedisManager = Depends(get_redis),
+):
+    """
+    Logout user by revoking current access token.
+
+    Args:
+        authorization: Authorization header with Bearer token
+        redis: Redis manager for token blacklisting
+
+    Returns:
+        Success message
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header",
+        )
+
+    token = authorization.replace("Bearer ", "")
+
+    # Revoke the token
+    success = await revoke_token(token, redis)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to revoke token",
+        )
+
+    return {"message": "Successfully logged out"}
+
+
+@router.post("/logout-all")
+async def logout_all(
+    db: AsyncSession = Depends(get_db),
+    redis: RedisManager = Depends(get_redis),
+    current_user = Depends(get_current_user_from_token),
+):
+    """
+    Logout user from all devices by revoking all tokens.
+
+    Args:
+        db: Database session
+        redis: Redis manager
+        current_user: Current authenticated user
+
+    Returns:
+        Success message
+    """
+    user_id = str(current_user.user_id)
+
+    # Revoke all tokens for this user
+    success = await revoke_all_user_tokens(user_id, redis)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to revoke tokens",
+        )
+
+    return {"message": "Successfully logged out from all devices"}

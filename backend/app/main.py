@@ -10,6 +10,15 @@ from app.core.database import init_db, close_db
 from app.core.redis import redis_manager
 from app.services.cache_service import CacheService
 from app.api import chat, auth
+from middleware.security import (
+    SecurityHeadersMiddleware,
+    SQLInjectionProtectionMiddleware,
+    XSSProtectionMiddleware,
+    RateLimitMiddleware,
+    CSRFProtectionMiddleware,
+    RequestValidationMiddleware,
+    AuditLoggingMiddleware,
+)
 
 
 @asynccontextmanager
@@ -62,6 +71,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security middleware (order matters - add from innermost to outermost)
+# 1. Audit logging (innermost - logs everything)
+app.add_middleware(AuditLoggingMiddleware)
+
+# 2. Request validation
+app.add_middleware(RequestValidationMiddleware)
+
+# 3. CSRF protection
+app.add_middleware(CSRFProtectionMiddleware, allowed_origins=settings.ALLOWED_ORIGINS)
+
+# 4. Rate limiting (uses Redis if available)
+app.add_middleware(RateLimitMiddleware, redis_manager=redis_manager)
+
+# 5. XSS protection
+app.add_middleware(XSSProtectionMiddleware)
+
+# 6. SQL injection protection
+app.add_middleware(SQLInjectionProtectionMiddleware)
+
+# 7. Security headers (outermost - adds headers to all responses)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # Health check endpoint
