@@ -13,12 +13,15 @@ import {
   clearConversation,
 } from '@/lib/api'
 
+type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'none'
+
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [sessionToken] = useState(() => getSessionToken())
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [crisisDetected, setCrisisDetected] = useState(false)
+  const [riskLevel, setRiskLevel] = useState<RiskLevel>('none')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Load conversation ID on mount
@@ -93,7 +96,7 @@ export default function ChatInterface() {
                 ? {
                     ...msg,
                     content:
-                      'Sorry, I encountered an error. Please try again.',
+                      '죄송합니다. 오류가 발생했습니다. 다시 시도해 주세요.',
                   }
                 : msg
             )
@@ -110,6 +113,7 @@ export default function ChatInterface() {
     setMessages([])
     setConversationId(null)
     setCrisisDetected(false)
+    setRiskLevel('none')
     clearConversation()
   }
 
@@ -118,23 +122,23 @@ export default function ChatInterface() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-counselor-main text-white">
         <div>
-          <h2 className="text-xl font-semibold">Chat Session</h2>
+          <h2 className="text-xl font-semibold">마음이와 대화</h2>
           <p className="text-sm text-green-100">
-            {conversationId ? 'Conversation in progress' : 'Start a new conversation'}
+            {conversationId ? '대화가 진행 중입니다' : '새로운 대화를 시작하세요'}
           </p>
         </div>
         {messages.length > 0 && (
           <button
             onClick={handleNewConversation}
-            className="px-4 py-2 bg-white text-counselor-main rounded-lg hover:bg-green-50 transition-colors"
+            className="px-4 py-2 bg-white text-counselor-main rounded-lg hover:bg-green-50 transition-colors font-medium"
           >
-            New Chat
+            새 대화
           </button>
         )}
       </div>
 
       {/* Crisis Alert */}
-      {crisisDetected && <CrisisAlert />}
+      {crisisDetected && <CrisisAlert riskLevel={riskLevel} />}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">
@@ -153,12 +157,15 @@ export default function ChatInterface() {
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
               />
             </svg>
-            <h3 className="text-lg font-medium mb-2">Welcome!</h3>
-            <p className="text-center text-sm max-w-md">
-              I'm here to listen and provide support. Feel free to share
-              what's on your mind. Everything you share is private and
-              confidential.
+            <h3 className="text-lg font-bold mb-2">안녕하세요! 마음이입니다 👋</h3>
+            <p className="text-center text-sm max-w-md leading-relaxed">
+              저는 당신의 이야기를 경청하고 지지하는 AI 심리상담 도우미입니다.
+              마음 편히 당신의 생각과 감정을 나눠주세요.
+              모든 대화는 비밀이 보장됩니다.
             </p>
+            <div className="mt-4 text-xs text-gray-400">
+              💡 무엇이든 물어보세요
+            </div>
           </div>
         ) : (
           <MessageList messages={messages} isLoading={isLoading} />

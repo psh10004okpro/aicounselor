@@ -44,7 +44,7 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message... (Shift+Enter for new line)"
+          placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
           disabled={disabled}
           rows={1}
           className="flex-1 resize-none rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-counselor-main focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed max-h-32 overflow-y-auto"
@@ -54,7 +54,7 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
           disabled={disabled || !message.trim()}
           className="px-6 py-3 bg-counselor-main text-white rounded-lg font-medium hover:bg-counselor-dark disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
         >
-          <span>Send</span>
+          <span>전송</span>
           <svg
             className="w-5 h-5"
             fill="none"
@@ -71,7 +71,7 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
         </button>
       </div>
       <p className="text-xs text-gray-500 mt-2">
-        Press Enter to send, Shift+Enter for new line
+        Enter 키로 전송, Shift+Enter로 줄바꿈
       </p>
     </div>
   )
