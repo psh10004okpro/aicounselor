@@ -8,6 +8,8 @@ from app.core.config import settings
 from app.core.redis import RedisManager
 from app.services.cache_service import CacheService
 from app.services.cbt_stage_service import CBTStageService
+from app.services.dynamic_prompt_service import DynamicPromptService
+from app.services.age_based_counseling import AgeGroup
 
 
 # Pricing per 1M tokens (USD) for GPT-4o-mini
@@ -433,6 +435,204 @@ class OpenAIService:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages_with_cbt,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+            )
+
+            response_content = response.choices[0].message.content
+
+            # Track usage
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            cost = self._calculate_cost(input_tokens, output_tokens)
+
+            if self.cache_service and user_id:
+                await self.cache_service.track_usage(
+                    user_id=user_id,
+                    tokens=total_tokens,
+                    cost=cost,
+                    model=self.model,
+                )
+
+            # Cache the response
+            await redis_manager.semantic_cache_set(
+                query_id=cache_key,
+                query_embedding=query_embedding,
+                response={"content": response_content},
+            )
+
+            # Assess stage progress (every 3 messages)
+            if len(messages) % 3 == 0:
+                await cbt_service.assess_stage_progress_auto(
+                    conversation_id=conversation_id,
+                    recent_messages=messages[-6:]
+                )
+
+            yield response_content
+
+    async def chat_completion_with_dynamic_prompts(
+        self,
+        messages: List[dict[str, str]],
+        conversation_id: str,
+        cbt_service: CBTStageService,
+        dynamic_prompt_service: DynamicPromptService,
+        redis_manager: RedisManager,
+        user_age: Optional[int] = None,
+        stream: bool = False,
+        user_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None] | str:
+        """
+        Generate chat completion with FULL DYNAMIC PROMPT SYSTEM integration.
+
+        This is the most advanced chat completion method that integrates:
+        1. Crisis detection (C-SSRS) - HIGHEST PRIORITY
+        2. Age-based counseling (adolescent vs adult)
+        3. CBT stage awareness (6 stages)
+        4. Emotion detection (anxiety, depression, anger, etc.)
+        5. Semantic caching and FAQ matching
+
+        The system automatically selects the most appropriate prompt based on
+        all these factors, ensuring optimal therapeutic response.
+
+        Args:
+            messages: Chat messages
+            conversation_id: Conversation identifier
+            cbt_service: CBT stage service
+            dynamic_prompt_service: Dynamic prompt service
+            redis_manager: Redis manager for caching
+            user_age: User age for age-based counseling
+            stream: Whether to stream response
+            user_id: User identifier for usage tracking
+
+        Yields/Returns:
+            Response chunks if streaming, complete response otherwise
+        """
+        # Get last user message
+        last_message = messages[-1]["content"]
+
+        # Step 1: Check FAQ cache first (fastest)
+        if self.cache_service:
+            faq_response = await self.cache_service.get_faq_response(last_message)
+            if faq_response:
+                await self.cache_service.track_cache_hit()
+                faq_answer = faq_response["answer"]
+
+                if stream:
+                    for char in faq_answer:
+                        yield char
+                else:
+                    yield faq_answer
+                return
+
+        # Step 2: Determine age group
+        age_group = None
+        if user_age:
+            if 13 <= user_age <= 18:
+                age_group = AgeGroup.ADOLESCENT
+            elif user_age >= 19:
+                age_group = AgeGroup.ADULT
+
+        # Step 3: Get current CBT stage
+        cbt_stage = None
+        try:
+            cbt_stage = await cbt_service.get_current_stage(conversation_id)
+        except:
+            pass  # Use None if stage not found
+
+        # Step 4: Build conversation context
+        conversation_context = {
+            "messages": messages,
+            "user_age_group": age_group.value if age_group else None,
+            "conversation_id": conversation_id
+        }
+
+        # Step 5: SELECT OPTIMAL PROMPT using DynamicPromptService
+        prompt_selection = await dynamic_prompt_service.select_prompt(
+            conversation_context=conversation_context,
+            age_group=age_group,
+            cbt_stage=cbt_stage,
+            last_message=last_message
+        )
+
+        selected_prompt = prompt_selection["selected_prompt"]
+        prompt_key = prompt_selection["prompt_key"]
+
+        # Log prompt selection for debugging
+        print(f"🎯 Dynamic Prompt Selected: {prompt_key}")
+        print(f"   Reasoning: {prompt_selection['reasoning']}")
+        print(f"   Factors: {prompt_selection['factors']}")
+
+        # Step 6: Inject selected dynamic prompt as system message
+        messages_with_dynamic_prompt = [
+            {"role": "system", "content": selected_prompt},
+            *messages
+        ]
+
+        # Step 7: Create cache key
+        cache_key = self._create_cache_key(messages_with_dynamic_prompt)
+
+        # Step 8: Get query embedding
+        query_embedding = await self.create_embedding(last_message)
+
+        # Step 9: Check semantic cache
+        cached_result = await redis_manager.semantic_cache_search(query_embedding)
+
+        if cached_result:
+            if self.cache_service:
+                await self.cache_service.track_cache_hit()
+
+            cached_response = cached_result["response"]["content"]
+
+            if stream:
+                for char in cached_response:
+                    yield char
+            else:
+                yield cached_response
+            return
+
+        # Step 10: Track cache miss
+        if self.cache_service:
+            await self.cache_service.track_cache_miss()
+
+        # Step 11: Generate new response with dynamically selected prompt
+        if stream:
+            response_content = ""
+            stream_response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages_with_dynamic_prompt,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+                stream=True,
+            )
+
+            async for chunk in stream_response:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    response_content += content
+                    yield content
+
+            # Track usage and cache
+            await self._track_usage_and_cache(
+                messages=messages_with_dynamic_prompt,
+                response_content=response_content,
+                cache_key=cache_key,
+                query_embedding=query_embedding,
+                redis_manager=redis_manager,
+                user_id=user_id,
+            )
+
+            # Assess stage progress after response (every 3 messages)
+            if len(messages) % 3 == 0:
+                await cbt_service.assess_stage_progress_auto(
+                    conversation_id=conversation_id,
+                    recent_messages=messages[-6:]
+                )
+
+        else:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages_with_dynamic_prompt,
                 max_tokens=settings.OPENAI_MAX_TOKENS,
                 temperature=settings.OPENAI_TEMPERATURE,
             )
