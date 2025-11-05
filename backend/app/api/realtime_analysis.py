@@ -18,6 +18,7 @@ from app.services.realtime_analyzer import (
     EnhancedPromptSelector
 )
 from app.services.openai_service import OpenAIService
+from app.services.alert_system import CrisisAlertSystem, AlertResponse
 
 
 router = APIRouter(prefix="/api", tags=["realtime-analysis"])
@@ -32,6 +33,8 @@ class MessageAnalysisRequest(BaseModel):
     message: str = Field(..., description="User message to analyze")
     conversation_context: Optional[List[Dict]] = Field(None, description="Previous messages")
     user_profile: Optional[Dict] = Field(None, description="User profile (age, session_count, etc.)")
+    generate_alert: bool = Field(False, description="Whether to generate alert if crisis detected")
+    user_id: Optional[str] = Field(None, description="User ID for alert generation")
 
 
 class MessageAnalysisResponse(BaseModel):
@@ -43,6 +46,7 @@ class MessageAnalysisResponse(BaseModel):
     recommended_approach: str
     confidence: float
     analysis_timestamp: str
+    alert: Optional[Dict] = None  # Alert info if generated
 
 
 class PromptSelectionRequest(BaseModel):
@@ -84,6 +88,11 @@ def get_message_analyzer(
     return RealtimeMessageAnalyzer(openai_client=openai_service.client)
 
 
+def get_alert_system() -> CrisisAlertSystem:
+    """Get alert system instance"""
+    return CrisisAlertSystem()
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
@@ -91,7 +100,8 @@ def get_message_analyzer(
 @router.post("/analyze/message", response_model=MessageAnalysisResponse)
 async def analyze_message(
     request: MessageAnalysisRequest,
-    analyzer: RealtimeMessageAnalyzer = Depends(get_message_analyzer)
+    analyzer: RealtimeMessageAnalyzer = Depends(get_message_analyzer),
+    alert_system: CrisisAlertSystem = Depends(get_alert_system)
 ):
     """
     Analyze message using GPT-4 for comprehensive insights
@@ -106,19 +116,17 @@ async def analyze_message(
     - Recommended CBT stage
     - Suggested therapeutic approach
     - Analysis confidence level
+    - **Optional:** Generate crisis alert if requested
 
-    **Example Request:**
+    **Example Request (with alert generation):**
     ```json
     {
-        "message": "요즘 너무 힘들어서 잠도 못 자고 아무것도 하기 싫어요",
-        "conversation_context": [
-            {"role": "user", "content": "안녕하세요"},
-            {"role": "assistant", "content": "안녕하세요. 어떻게 도와드릴까요?"}
-        ],
+        "message": "죽고 싶어요",
         "user_profile": {
-            "age": 28,
-            "session_count": 3
-        }
+            "age": 17
+        },
+        "generate_alert": true,
+        "user_id": "user123"
     }
     ```
 
@@ -127,14 +135,21 @@ async def analyze_message(
     {
         "emotions": {
             "primary": "depression",
-            "secondary": ["anxiety", "fatigue"],
-            "intensity": 0.75
+            "secondary": ["hopelessness"],
+            "intensity": 0.95
         },
-        "crisis_level": 2,
-        "crisis_indicators": ["잠도 못 자", "아무것도 하기 싫"],
+        "crisis_level": 4,
+        "crisis_indicators": ["죽고 싶"],
         "session_stage_suggestion": "assessment",
-        "recommended_approach": "공감적 경청 후 우울 증상의 심각도 평가",
-        "confidence": 0.85
+        "recommended_approach": "즉각적 위기 개입 필요",
+        "confidence": 0.9,
+        "alert": {
+            "alert_type": "emergency",
+            "priority": "critical",
+            "message": "⚠️ **긴급 상황 감지**...",
+            "emergency_contacts": [...],
+            "admin_notified": true
+        }
     }
     ```
     """
@@ -149,8 +164,32 @@ async def analyze_message(
         # Add timestamp
         analysis["analysis_timestamp"] = datetime.now().isoformat()
 
+        # Generate alert if requested and crisis detected
+        alert_data = None
+        if request.generate_alert and analysis["crisis_level"] >= 2:
+            if not request.user_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="user_id required when generate_alert is true"
+                )
+
+            alert_response = await alert_system.check_and_alert(
+                crisis_level=analysis["crisis_level"],
+                user_id=request.user_id,
+                message=request.message,
+                crisis_indicators=analysis["crisis_indicators"],
+                user_age=request.user_profile.get("age") if request.user_profile else None
+            )
+
+            # Convert to dict for response
+            alert_data = alert_response.model_dump()
+
+        analysis["alert"] = alert_data
+
         return MessageAnalysisResponse(**analysis)
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -352,23 +391,27 @@ async def batch_analyze_conversation(
 @router.post("/analyze/quick")
 async def quick_analysis(
     message: str = Field(..., description="Message to analyze"),
-    analyzer: RealtimeMessageAnalyzer = Depends(get_message_analyzer)
+    user_id: Optional[str] = Field(None, description="User ID for alert generation"),
+    analyzer: RealtimeMessageAnalyzer = Depends(get_message_analyzer),
+    alert_system: CrisisAlertSystem = Depends(get_alert_system)
 ):
     """
-    Quick message analysis (simplified)
+    Quick message analysis (simplified) with automatic alert generation
 
-    빠른 메시지 분석 (간소화 버전)
+    빠른 메시지 분석 (간소화 버전) - 자동 경고 생성
 
     **Use Case:**
     - Fast emotion check
     - Crisis screening
     - Real-time chat monitoring
+    - **Automatic alert generation for crisis levels 3-4**
 
     **Example:**
     ```
     POST /api/analyze/quick
     {
-        "message": "죽고 싶어요"
+        "message": "죽고 싶어요",
+        "user_id": "user123"
     }
     ```
 
@@ -379,7 +422,10 @@ async def quick_analysis(
         "primary_emotion": "depression",
         "intensity": 0.95,
         "immediate_action_required": true,
-        "recommendation": "즉시 위기 개입 필요"
+        "recommendation": "즉시 위기 개입 필요 - 119 또는 1393 연결",
+        "emergency_contact": "1393",
+        "alert_generated": true,
+        "alert_summary": "긴급 상황 - 관리자 알림 전송됨"
     }
     ```
     """
@@ -399,17 +445,39 @@ async def quick_analysis(
         # Determine immediate action
         immediate_action_required = crisis_level >= 3
         recommendation = ""
+        emergency_contact = None
 
         if crisis_level >= 4:
             recommendation = "즉시 위기 개입 필요 - 119 또는 1393 연결"
+            emergency_contact = "1393"
         elif crisis_level == 3:
             recommendation = "높은 위험 - 전문가 개입 및 모니터링 필요"
+            emergency_contact = "1393"
         elif crisis_level == 2:
             recommendation = "중간 위험 - 주의 깊은 관찰 및 지원"
+            emergency_contact = "1393"
         elif crisis_level == 1:
             recommendation = "낮은 위험 - 일반 상담 진행"
         else:
             recommendation = "안전 - 정상적인 대화 진행"
+
+        # Generate alert for high-risk situations
+        alert_generated = False
+        alert_summary = None
+
+        if crisis_level >= 3 and user_id:
+            alert_response = await alert_system.check_and_alert(
+                crisis_level=crisis_level,
+                user_id=user_id,
+                message=message,
+                crisis_indicators=analysis["crisis_indicators"]
+            )
+            alert_generated = True
+            alert_summary = f"{alert_response.alert_type.value} - "
+            if alert_response.admin_notified:
+                alert_summary += "관리자 알림 전송됨"
+            else:
+                alert_summary += "모니터링 필요"
 
         return {
             "crisis_level": crisis_level,
@@ -417,6 +485,9 @@ async def quick_analysis(
             "intensity": intensity,
             "immediate_action_required": immediate_action_required,
             "recommendation": recommendation,
+            "emergency_contact": emergency_contact,
+            "alert_generated": alert_generated,
+            "alert_summary": alert_summary,
             "full_analysis": analysis,
             "timestamp": datetime.now().isoformat()
         }
