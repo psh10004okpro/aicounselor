@@ -93,3 +93,41 @@ export interface ConsentData {
   consent_timestamp: Date
   user_id: string
 }
+
+// CBT Stage Types
+export interface CBTStage {
+  stage_number: number
+  stage_name: string
+  korean_name: string
+}
+
+export interface CBTProgress {
+  current_stage: number
+  stage_name: string
+  stage_progress: number
+  goals_achieved: string[]
+  goals_pending: string[]
+  readiness_for_next_stage: number
+  stage_history?: Array<{
+    from_stage: number
+    to_stage: number
+    transitioned_at: string
+    goals_achieved: string[]
+  }>
+}
+
+export interface CBTStageInfo {
+  success: boolean
+  conversation_id: string
+  current_stage: CBTStage
+  progress: CBTProgress
+}
+
+export interface CBTStageDescription {
+  stage_number: number
+  stage_name: string
+  korean_name: string
+  goals: string[]
+  description: string
+  system_prompt_preview?: string
+}

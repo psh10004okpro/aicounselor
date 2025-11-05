@@ -11,6 +11,7 @@ Complete API reference for the AI Counselor backend services.
    - [Chat](#chat-endpoints)
    - [Conversations](#conversation-endpoints)
    - [User](#user-endpoints)
+   - [CBT Stage Management](#cbt-stage-management)
 4. [WebSocket](#websocket)
 5. [Error Handling](#error-handling)
 6. [Rate Limiting](#rate-limiting)
@@ -971,6 +972,440 @@ async function refreshAccessToken() {
 
 // Automatically refresh before expiration
 setInterval(refreshAccessToken, 14 * 60 * 1000); // 14 minutes
+```
+
+---
+
+## CBT Stage Management
+
+The AI Counselor implements a sophisticated 6-stage CBT (Cognitive Behavioral Therapy) framework with dynamic prompting that adapts to the user's therapeutic progress.
+
+### CBT Stages Overview
+
+The system follows these 6 therapeutic stages:
+
+1. **Assessment (초기 평가)**: Rapport building, problem identification, trust establishment
+2. **Reconceptualization (재개념화)**: Understanding thought-emotion-behavior connections, ABC model learning
+3. **Skills Acquisition (기술 습득)**: Learning CBT techniques (cognitive restructuring, problem-solving)
+4. **Skills Application (기술 적용)**: Applying learned techniques in real-life situations
+5. **Generalization (일반화 및 유지)**: Relapse prevention planning, long-term application
+6. **Termination (종결)**: Celebrating achievements, future planning, positive closure
+
+### CBT Endpoints
+
+#### Get Current Stage
+
+Get the current CBT stage and progress for a conversation.
+
+**Endpoint**: `GET /cbt/stages/{conversation_id}`
+
+**Request**:
+```http
+GET /cbt/stages/123e4567-e89b-12d3-a456-426614174000 HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "current_stage": {
+    "stage_number": 2,
+    "stage_name": "reconceptualization",
+    "korean_name": "재개념화"
+  },
+  "progress": {
+    "current_stage": 2,
+    "stage_name": "reconceptualization",
+    "stage_progress": 65,
+    "goals_achieved": [
+      "abc_model_understood",
+      "thought_emotion_connection_clear"
+    ],
+    "goals_pending": [
+      "identify_cognitive_distortions"
+    ],
+    "readiness_for_next_stage": 60,
+    "stage_history": [
+      {
+        "from_stage": 1,
+        "to_stage": 2,
+        "transitioned_at": "2024-01-05T10:30:00Z",
+        "goals_achieved": ["rapport_built", "problem_identified"]
+      }
+    ]
+  }
+}
+```
+
+---
+
+#### Initialize CBT Stage
+
+Initialize CBT stage tracking for a new conversation. Automatically starts at Stage 1 (Assessment).
+
+**Endpoint**: `POST /cbt/stages/{conversation_id}/initialize`
+
+**Request**:
+```http
+POST /cbt/stages/123e4567-e89b-12d3-a456-426614174000/initialize HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "CBT stage initialized successfully",
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "initial_stage": {
+    "stage_number": 1,
+    "stage_name": "assessment",
+    "korean_name": "초기 평가"
+  }
+}
+```
+
+---
+
+#### Assess Stage Progress
+
+Manually trigger a progress assessment for the current stage.
+
+**Endpoint**: `POST /cbt/stages/{conversation_id}/assess`
+
+**Request**:
+```http
+POST /cbt/stages/123e4567-e89b-12d3-a456-426614174000/assess HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+
+{
+  "recent_messages": [
+    {"role": "user", "content": "I've been practicing the techniques you taught me"},
+    {"role": "assistant", "content": "That's wonderful! How has it been going?"},
+    {"role": "user", "content": "I can identify my negative thoughts now"}
+  ]
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assessment": {
+    "progress_percentage": 75,
+    "goals_achieved": ["abc_model_understood", "thought_emotion_connection_clear"],
+    "goals_pending": ["identify_cognitive_distortions"],
+    "readiness_score": 70,
+    "recommendation": "continue",
+    "reasoning": "Client is making good progress understanding the ABC model and identifying thought-emotion connections. Continue reinforcing these concepts before advancing."
+  }
+}
+```
+
+---
+
+#### Advance to Next Stage
+
+Advance the conversation to the next CBT stage.
+
+**Endpoint**: `POST /cbt/stages/{conversation_id}/advance`
+
+**Query Parameters**:
+- `force` (boolean, optional): Force transition even if not ready (default: false)
+
+**Request**:
+```http
+POST /cbt/stages/123e4567-e89b-12d3-a456-426614174000/advance?force=false HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "Successfully advanced to next stage",
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "previous_stage": 2,
+  "current_stage": {
+    "stage_number": 3,
+    "stage_name": "skills_acquisition",
+    "korean_name": "기술 습득"
+  }
+}
+```
+
+**Response** (400 Bad Request - Not Ready):
+```json
+{
+  "success": false,
+  "message": "Not ready to advance. Readiness score: 45% (requires 70%+)"
+}
+```
+
+---
+
+#### Get Stage History
+
+Get the complete stage transition history for a conversation.
+
+**Endpoint**: `GET /cbt/stages/{conversation_id}/history`
+
+**Request**:
+```http
+GET /cbt/stages/123e4567-e89b-12d3-a456-426614174000/history HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "stage_history": [
+    {
+      "from_stage": 1,
+      "to_stage": 2,
+      "transitioned_at": "2024-01-05T10:30:00Z",
+      "goals_achieved": ["rapport_built", "problem_identified", "goals_established"]
+    },
+    {
+      "from_stage": 2,
+      "to_stage": 3,
+      "transitioned_at": "2024-01-12T14:20:00Z",
+      "goals_achieved": ["abc_model_understood", "thought_emotion_connection_clear"]
+    }
+  ],
+  "current_stage": {
+    "stage_number": 3,
+    "stage_name": "skills_acquisition"
+  }
+}
+```
+
+---
+
+#### Get Assessment History
+
+Get the history of automatic assessments performed during the conversation.
+
+**Endpoint**: `GET /cbt/stages/{conversation_id}/assessments`
+
+**Query Parameters**:
+- `limit` (integer, optional): Maximum number of assessments to return (default: 10)
+
+**Request**:
+```http
+GET /cbt/stages/123e4567-e89b-12d3-a456-426614174000/assessments?limit=5 HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+  "assessments": [
+    {
+      "assessment_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "stage": 3,
+      "stage_name": "skills_acquisition",
+      "assessment_type": "automatic",
+      "assessment_result": {
+        "progress_percentage": 80,
+        "readiness_score": 75,
+        "recommendation": "continue"
+      },
+      "messages_analyzed": 6,
+      "assessed_at": "2024-01-15T16:45:00Z"
+    }
+  ],
+  "total": 5
+}
+```
+
+---
+
+#### Get All Stages Information
+
+Get comprehensive information about all 6 CBT stages.
+
+**Endpoint**: `GET /cbt/info/stages`
+
+**Request**:
+```http
+GET /cbt/info/stages HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "total_stages": 6,
+  "stages": [
+    {
+      "stage_number": 1,
+      "stage_name": "assessment",
+      "korean_name": "초기 평가",
+      "goals": [
+        "rapport_built",
+        "problem_identified",
+        "goals_established"
+      ],
+      "description": "라포 형성, 문제 파악, 신뢰 구축을 목표로 하는 초기 평가 단계"
+    },
+    {
+      "stage_number": 2,
+      "stage_name": "reconceptualization",
+      "korean_name": "재개념화",
+      "goals": [
+        "abc_model_understood",
+        "thought_emotion_connection_clear",
+        "identify_cognitive_distortions"
+      ],
+      "description": "생각-감정-행동 연결고리 이해, ABC 모델 학습 단계"
+    }
+  ]
+}
+```
+
+---
+
+#### Get Specific Stage Information
+
+Get detailed information about a specific CBT stage.
+
+**Endpoint**: `GET /cbt/info/stages/{stage_number}`
+
+**Path Parameters**:
+- `stage_number` (integer): Stage number (1-6)
+
+**Request**:
+```http
+GET /cbt/info/stages/3 HTTP/1.1
+Host: api.yourdomain.com
+Content-Type: application/json
+```
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "stage": {
+    "stage_number": 3,
+    "stage_name": "skills_acquisition",
+    "korean_name": "기술 습득",
+    "goals": [
+      "learn_cognitive_restructuring",
+      "learn_problem_solving",
+      "practice_behavioral_activation"
+    ],
+    "description": "인지 재구조화, 문제 해결 등 CBT 기법을 배우는 단계",
+    "system_prompt_preview": "당신은 현재 **3단계: 기술 습득 (Skills Acquisition)** 단계에 있습니다..."
+  }
+}
+```
+
+**Response** (400 Bad Request - Invalid Stage):
+```json
+{
+  "detail": "Stage number must be between 1 and 6"
+}
+```
+
+---
+
+### CBT Integration Features
+
+#### Dynamic Prompting
+
+The system automatically adapts its therapeutic approach based on the current stage:
+
+- **Stage-Specific Prompts**: Each stage has a detailed system prompt (500-2000+ characters) guiding the AI's behavior
+- **Real-Time Progress**: Progress information is injected into prompts for context-aware responses
+- **Goal-Oriented**: AI focuses on achieving specific therapeutic goals for each stage
+
+#### Automatic Assessment
+
+Progress is automatically assessed every 3 message exchanges:
+
+- **GPT-4 Analysis**: Uses GPT-4 to analyze recent conversation for progress indicators
+- **Readiness Scoring**: Calculates readiness for next stage (0-100%)
+- **Recommendations**: Provides actionable recommendations (continue, advance, review)
+
+#### Stage Transition Rules
+
+Transitions between stages follow these rules:
+
+- **Readiness Threshold**: Requires 70%+ readiness score (unless forced)
+- **Goal Achievement**: Tracks required vs. optional goals per stage
+- **Audit Trail**: Records all transitions with timestamps and achieved goals
+- **Final Stage Lock**: Cannot advance beyond Stage 6 (Termination)
+
+#### Frontend Integration
+
+The frontend displays real-time stage information:
+
+- **Stage Indicator**: Visual component showing current stage and progress
+- **Progress Bar**: Animated progress bar (0-100%)
+- **Goals Tracker**: Shows achieved and pending goals
+- **Readiness Badge**: Displays when ready for next stage
+
+---
+
+### CBT Usage Example
+
+Complete flow of CBT stage management:
+
+```javascript
+// 1. Create a new conversation
+const session = await createAnonymousSession();
+const conversationResponse = await sendMessage({
+  message: "안녕하세요, 요즘 불안감이 심해요",
+  sessionToken: session.session_token
+});
+
+const conversationId = conversationResponse.conversation_id;
+
+// 2. Initialize CBT stage tracking (happens automatically in chat endpoint)
+// But can be done manually if needed
+await fetch(`/cbt/stages/${conversationId}/initialize`, {
+  method: 'POST'
+});
+
+// 3. Get current stage
+const stageInfo = await fetch(`/cbt/stages/${conversationId}`);
+console.log(stageInfo.current_stage); // Stage 1: Assessment
+
+// 4. Continue conversation (automatic assessments every 3 exchanges)
+// ...after several messages...
+
+// 5. Check progress
+const progress = await fetch(`/cbt/stages/${conversationId}`);
+console.log(progress.progress.readiness_for_next_stage); // 75%
+
+// 6. Advance to next stage when ready
+if (progress.progress.readiness_for_next_stage >= 70) {
+  const advanceResult = await fetch(
+    `/cbt/stages/${conversationId}/advance`,
+    { method: 'POST' }
+  );
+  console.log(advanceResult.current_stage); // Stage 2: Reconceptualization
+}
+
+// 7. View stage history
+const history = await fetch(`/cbt/stages/${conversationId}/history`);
+console.log(history.stage_history); // Array of transitions
 ```
 
 ---

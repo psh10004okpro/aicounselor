@@ -6,6 +6,7 @@ import MessageList from './MessageList'
 import MessageInput from './MessageInput'
 import CrisisAlert from './CrisisAlert'
 import ConsentModal from './ConsentModal'
+import CBTStageIndicator from './CBTStageIndicator'
 import {
   streamChatMessage,
   getSessionToken,
@@ -155,6 +156,13 @@ export default function ChatInterface() {
 
       {/* Crisis Alert */}
       {crisisDetected && <CrisisAlert riskLevel={riskLevel} />}
+
+      {/* CBT Stage Indicator */}
+      {conversationId && messages.length > 0 && (
+        <div className="px-4 py-2">
+          <CBTStageIndicator conversationId={conversationId} />
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto">

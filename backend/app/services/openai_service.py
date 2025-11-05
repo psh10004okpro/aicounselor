@@ -7,6 +7,7 @@ import hashlib
 from app.core.config import settings
 from app.core.redis import RedisManager
 from app.services.cache_service import CacheService
+from app.services.cbt_stage_service import CBTStageService
 
 
 # Pricing per 1M tokens (USD) for GPT-4o-mini
@@ -311,3 +312,159 @@ class OpenAIService:
 - 구체적이고 실용적인 조언 제공
 
 항상 전문 면허가 있는 상담사나 정신건강 전문가의 도움을 받도록 격려하세요. 특히 지속적인 지원이 필요한 경우에는 더욱 그렇습니다."""
+
+    async def chat_completion_with_cbt(
+        self,
+        messages: List[dict[str, str]],
+        conversation_id: str,
+        cbt_service: CBTStageService,
+        redis_manager: RedisManager,
+        stream: bool = False,
+        user_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None] | str:
+        """
+        Generate chat completion with CBT stage-aware dynamic prompting.
+
+        This method integrates CBT stage management:
+        1. Gets current CBT stage
+        2. Retrieves dynamic system prompt based on stage
+        3. Generates response with stage-specific guidance
+        4. Automatically assesses progress after response
+        5. Suggests stage transition if ready
+
+        Args:
+            messages: Chat messages
+            conversation_id: Conversation identifier
+            cbt_service: CBT stage service
+            redis_manager: Redis manager for caching
+            stream: Whether to stream response
+            user_id: User identifier for usage tracking
+
+        Yields/Returns:
+            Response chunks if streaming, complete response otherwise
+        """
+        # Get dynamic system prompt based on current CBT stage
+        dynamic_prompt = await cbt_service.get_dynamic_prompt(conversation_id)
+
+        # Inject dynamic prompt as system message
+        messages_with_cbt = [
+            {"role": "system", "content": dynamic_prompt},
+            *messages
+        ]
+
+        # Get last user message
+        last_message = messages[-1]["content"]
+
+        # Step 1: Check FAQ cache first
+        if self.cache_service:
+            faq_response = await self.cache_service.get_faq_response(last_message)
+            if faq_response:
+                await self.cache_service.track_cache_hit()
+                faq_answer = faq_response["answer"]
+
+                if stream:
+                    for char in faq_answer:
+                        yield char
+                else:
+                    yield faq_answer
+                return
+
+        # Create cache key
+        cache_key = self._create_cache_key(messages_with_cbt)
+
+        # Get query embedding
+        query_embedding = await self.create_embedding(last_message)
+
+        # Step 2: Check semantic cache
+        cached_result = await redis_manager.semantic_cache_search(query_embedding)
+
+        if cached_result:
+            if self.cache_service:
+                await self.cache_service.track_cache_hit()
+
+            cached_response = cached_result["response"]["content"]
+
+            if stream:
+                for char in cached_response:
+                    yield char
+            else:
+                yield cached_response
+            return
+
+        # Step 3: Track cache miss
+        if self.cache_service:
+            await self.cache_service.track_cache_miss()
+
+        # Generate new response with CBT-aware prompt
+        if stream:
+            response_content = ""
+            stream_response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages_with_cbt,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+                stream=True,
+            )
+
+            async for chunk in stream_response:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    response_content += content
+                    yield content
+
+            # Track usage and cache
+            await self._track_usage_and_cache(
+                messages=messages_with_cbt,
+                response_content=response_content,
+                cache_key=cache_key,
+                query_embedding=query_embedding,
+                redis_manager=redis_manager,
+                user_id=user_id,
+            )
+
+            # Assess stage progress after response (every 3 messages)
+            if len(messages) % 3 == 0:
+                await cbt_service.assess_stage_progress_auto(
+                    conversation_id=conversation_id,
+                    recent_messages=messages[-6:]  # Last 6 messages
+                )
+
+        else:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages_with_cbt,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+            )
+
+            response_content = response.choices[0].message.content
+
+            # Track usage
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            cost = self._calculate_cost(input_tokens, output_tokens)
+
+            if self.cache_service and user_id:
+                await self.cache_service.track_usage(
+                    user_id=user_id,
+                    tokens=total_tokens,
+                    cost=cost,
+                    model=self.model,
+                )
+
+            # Cache the response
+            await redis_manager.semantic_cache_set(
+                query_id=cache_key,
+                query_embedding=query_embedding,
+                response={"content": response_content},
+            )
+
+            # Assess stage progress (every 3 messages)
+            if len(messages) % 3 == 0:
+                await cbt_service.assess_stage_progress_auto(
+                    conversation_id=conversation_id,
+                    recent_messages=messages[-6:]
+                )
+
+            yield response_content

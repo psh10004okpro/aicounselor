@@ -13,6 +13,7 @@ from app.services.openai_service import OpenAIService
 from app.services.crisis_detector import crisis_detection_system, RiskLevel
 from app.services.conversation_service import ConversationService
 from app.services.cache_service import CacheService
+from app.services.cbt_stage_service import CBTStageService
 from app.models.user import User
 import json
 
@@ -64,6 +65,7 @@ async def send_message(
     cache_service = CacheService(redis)
     openai_service = OpenAIService(cache_service=cache_service)
     conversation_service = ConversationService(db, openai_service)
+    cbt_service = CBTStageService(db=db, openai_client=openai_service.client)
 
     # Rate limiting check (10 requests per minute)
     rate_limit_key = f"user:{user.id}"
@@ -96,6 +98,9 @@ async def send_message(
         conversation = await conversation_service.create_conversation(
             user_id=user.id, title=title
         )
+
+        # Initialize CBT stage for new conversation
+        await cbt_service.initialize_stage(str(conversation.id))
 
     # Create user message embedding
     user_embedding = await openai_service.create_embedding(request.message)
@@ -144,13 +149,14 @@ async def send_message(
             crisis_severity=assessment["risk_level"].value,
         )
 
-    # Add system prompt
-    system_prompt = openai_service._build_system_prompt()
-    messages = [{"role": "system", "content": system_prompt}] + context
-
-    # Get AI response (non-streaming)
-    response_generator = openai_service.chat_completion(
-        messages=messages, redis_manager=redis, stream=False, user_id=str(user.id)
+    # Get AI response with CBT-aware dynamic prompting (non-streaming)
+    response_generator = openai_service.chat_completion_with_cbt(
+        messages=context,
+        conversation_id=str(conversation.id),
+        cbt_service=cbt_service,
+        redis_manager=redis,
+        stream=False,
+        user_id=str(user.id)
     )
 
     # Get complete response
@@ -202,6 +208,7 @@ async def stream_message(
             cache_service = CacheService(redis)
             openai_service = OpenAIService(cache_service=cache_service)
             conversation_service = ConversationService(db, openai_service)
+            cbt_service = CBTStageService(db=db, openai_client=openai_service.client)
 
             # Rate limiting check (10 requests per minute)
             rate_limit_key = f"user:{user.id}"
@@ -236,6 +243,9 @@ async def stream_message(
                 conversation = await conversation_service.create_conversation(
                     user_id=user.id, title=title
                 )
+
+                # Initialize CBT stage for new conversation
+                await cbt_service.initialize_stage(str(conversation.id))
 
             # Create user message embedding
             user_embedding = await openai_service.create_embedding(request.message)
@@ -298,14 +308,15 @@ async def stream_message(
                 yield f"data: {done_chunk.model_dump_json()}\n\n"
                 return
 
-            # Add system prompt
-            system_prompt = openai_service._build_system_prompt()
-            messages = [{"role": "system", "content": system_prompt}] + context
-
-            # Stream AI response
+            # Stream AI response with CBT-aware dynamic prompting
             complete_response = ""
-            async for chunk in openai_service.chat_completion(
-                messages=messages, redis_manager=redis, stream=True, user_id=str(user.id)
+            async for chunk in openai_service.chat_completion_with_cbt(
+                messages=context,
+                conversation_id=str(conversation.id),
+                cbt_service=cbt_service,
+                redis_manager=redis,
+                stream=True,
+                user_id=str(user.id)
             ):
                 complete_response += chunk
                 stream_chunk = StreamChunk(
