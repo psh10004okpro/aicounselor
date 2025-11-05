@@ -18,14 +18,20 @@ type RiskLevel = 'critical' | 'high' | 'medium' | 'low' | 'none'
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionToken] = useState(() => getSessionToken())
+  const [sessionToken, setSessionToken] = useState<string>('')
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [crisisDetected, setCrisisDetected] = useState(false)
   const [riskLevel, setRiskLevel] = useState<RiskLevel>('none')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Load conversation ID on mount
+  // Initialize session token on mount
   useEffect(() => {
+    const initSession = async () => {
+      const token = await getSessionToken()
+      setSessionToken(token)
+    }
+    initSession()
+
     const savedConversationId = getConversationId()
     if (savedConversationId) {
       setConversationId(savedConversationId)
@@ -38,7 +44,7 @@ export default function ChatInterface() {
   }, [messages])
 
   const handleSendMessage = async (content: string) => {
-    if (!content.trim() || isLoading) return
+    if (!content.trim() || isLoading || !sessionToken) return
 
     // Add user message
     const userMessage: Message = {
@@ -174,7 +180,17 @@ export default function ChatInterface() {
       </div>
 
       {/* Input */}
-      <MessageInput onSend={handleSendMessage} disabled={isLoading} />
+      <MessageInput
+        onSend={handleSendMessage}
+        disabled={isLoading || !sessionToken}
+      />
+
+      {/* Loading session indicator */}
+      {!sessionToken && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-blue-100 text-blue-800 px-4 py-2 rounded-lg text-sm">
+          세션을 초기화하는 중...
+        </div>
+      )}
     </div>
   )
 }
