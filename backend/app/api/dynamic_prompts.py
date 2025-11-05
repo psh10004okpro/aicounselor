@@ -17,7 +17,8 @@ from app.database import get_db
 from app.services.dynamic_prompt_service import (
     DynamicPromptService,
     EmotionType,
-    EmotionIntensity
+    EmotionIntensity,
+    SpecialSituation
 )
 from app.services.crisis_detector_enhanced import CSSRSLevel
 from app.services.age_based_counseling import AgeGroup
@@ -530,5 +531,205 @@ async def get_emotion_keywords(
             "high": "7-10 (극도, 매우 높음)",
             "moderate": "4-6 (보통)",
             "low": "1-3 (낮음, 최소)"
+        }
+    }
+
+
+@router.post("/prompts/detect-special-situation")
+async def detect_special_situation(
+    message: str = Field(..., description="User message to analyze"),
+    message_count: int = Field(default=5, description="Number of messages in conversation"),
+    prompt_service: DynamicPromptService = Depends(get_dynamic_prompt_service)
+):
+    """
+    Detect special counseling situations
+
+    특수 상담 상황 탐지
+
+    **Detects:**
+    - First Session (첫 세션): < 3 messages
+    - Breakthrough (돌파구): Insight keywords + excitement
+    - Resistance (저항): Dismissive language, short responses
+    - None (일반): Normal conversation
+
+    **Example:**
+    ```json
+    {
+        "message": "모르겠어요. 별로 도움 안 되는 것 같아요",
+        "message_count": 10
+    }
+    ```
+
+    **Response:**
+    ```json
+    {
+        "special_situation": "resistance",
+        "detected": true,
+        "confidence": "high",
+        "description": "저항적 태도 감지"
+    }
+    ```
+    """
+    try:
+        # Build conversation context
+        conversation_context = {
+            "messages": [{"content": message, "role": "user"}] * message_count
+        }
+
+        # Detect special situation
+        special_situation = prompt_service.special_situation_detector.detect(
+            message=message,
+            conversation_context=conversation_context
+        )
+
+        # Get description
+        descriptions = {
+            SpecialSituation.FIRST_SESSION: "첫 세션 - 라포 형성 및 신뢰 구축",
+            SpecialSituation.RESISTANCE: "저항적 태도 - 비판단적 탐색 필요",
+            SpecialSituation.BREAKTHROUGH: "돌파구 순간 - 중요한 통찰 발생",
+            SpecialSituation.NONE: "일반 상담 상황"
+        }
+
+        return {
+            "special_situation": special_situation.value,
+            "detected": special_situation != SpecialSituation.NONE,
+            "confidence": "high",
+            "description": descriptions[special_situation],
+            "prompt_key": special_situation.value.upper() if special_situation != SpecialSituation.NONE else None
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Special situation detection failed: {str(e)}")
+
+
+@router.get("/prompts/special-situations")
+async def get_special_situations():
+    """
+    Get all special situation types and descriptions
+
+    특수 상황 목록 조회
+
+    **Returns:**
+    List of special situations with descriptions and indicators
+    """
+    situations = [
+        {
+            "type": "first_session",
+            "name_ko": "첫 세션",
+            "description": "내담자와의 첫 만남. 라포 형성 및 안전한 관계 구축이 목표",
+            "indicators": [
+                "메시지 수 < 3",
+                "초기 인사 및 소개"
+            ],
+            "priority": 1,
+            "prompt_key": "FIRST_SESSION"
+        },
+        {
+            "type": "breakthrough",
+            "name_ko": "돌파구 순간",
+            "description": "중요한 통찰과 깨달음이 일어나는 순간. 변화의 전환점",
+            "indicators": [
+                "통찰 키워드: '이해가 되네', '깨달았어', '알겠네'",
+                "강한 감정 표출 (놀람, 기쁨)",
+                "연결고리 발견"
+            ],
+            "priority": 2,
+            "prompt_key": "BREAKTHROUGH"
+        },
+        {
+            "type": "resistance",
+            "name_ko": "저항적 태도",
+            "description": "변화에 대한 저항, 방어적 태도. 비판단적 탐색 필요",
+            "indicators": [
+                "거부 키워드: '모르겠어', '별로', '그냥'",
+                "짧고 무성의한 응답",
+                "주제 회피",
+                "냉소적 태도"
+            ],
+            "priority": 3,
+            "prompt_key": "RESISTANCE"
+        },
+        {
+            "type": "none",
+            "name_ko": "일반 상황",
+            "description": "특별한 상황이 감지되지 않음. 정상적인 상담 진행",
+            "indicators": [
+                "특수 상황 조건 미충족"
+            ],
+            "priority": 4,
+            "prompt_key": None
+        }
+    ]
+
+    return {
+        "special_situations": situations,
+        "total_count": len(situations),
+        "detection_priority": "First Session > Breakthrough > Resistance > None"
+    }
+
+
+@router.get("/prompts/library-complete")
+async def get_complete_prompt_library():
+    """
+    Get COMPLETE prompt library including all special situations
+
+    완전한 프롬프트 라이브러리 조회 (특수 상황 포함)
+
+    **Returns:**
+    All 20+ prompts organized by category
+    """
+    prompts = {
+        "crisis": [
+            {
+                "key": "CRISIS_INTERVENTION",
+                "name_ko": "위기 개입",
+                "target": "Level 3-4 자살/자해 위험",
+                "priority": "최우선"
+            }
+        ],
+        "teen_prompts": [
+            {"key": "TEEN_ASSESSMENT_ANXIETY", "name_ko": "청소년 초기평가-불안", "stage": 1, "emotion": "anxiety"},
+            {"key": "TEEN_ASSESSMENT_DEPRESSION", "name_ko": "청소년 초기평가-우울", "stage": 1, "emotion": "depression"},
+            {"key": "TEEN_RECONCEPTUALIZATION_ANXIETY", "name_ko": "청소년 재개념화-불안", "stage": 2, "emotion": "anxiety"},
+            {"key": "TEEN_RECONCEPTUALIZATION_DEPRESSION", "name_ko": "청소년 재개념화-우울", "stage": 2, "emotion": "depression"},
+            {"key": "TEEN_SKILLS_ANXIETY", "name_ko": "청소년 기술습득-불안", "stage": 3, "emotion": "anxiety"},
+            {"key": "TEEN_APPLICATION_ANGER", "name_ko": "청소년 기술적용-분노", "stage": 4, "emotion": "anger"},
+            {"key": "TEEN_MAINTENANCE_NEUTRAL", "name_ko": "청소년 유지관리-안정", "stage": 5, "emotion": "neutral"}
+        ],
+        "adult_prompts": [
+            {"key": "ADULT_ASSESSMENT_ANXIETY", "name_ko": "성인 초기평가-불안", "stage": 1, "emotion": "anxiety"},
+            {"key": "ADULT_ASSESSMENT_DEPRESSION", "name_ko": "성인 초기평가-우울", "stage": 1, "emotion": "depression"},
+            {"key": "ADULT_RECONCEPTUALIZATION_ANXIETY", "name_ko": "성인 재개념화-불안", "stage": 2, "emotion": "anxiety"},
+            {"key": "ADULT_RECONCEPTUALIZATION_DEPRESSION", "name_ko": "성인 재개념화-우울", "stage": 2, "emotion": "depression"},
+            {"key": "ADULT_SKILLS_DEPRESSION", "name_ko": "성인 기술습득-우울", "stage": 3, "emotion": "depression"},
+            {"key": "ADULT_APPLICATION_ANXIETY", "name_ko": "성인 기술적용-불안", "stage": 4, "emotion": "anxiety"},
+            {"key": "ADULT_APPLICATION_DEPRESSION", "name_ko": "성인 기술적용-우울", "stage": 4, "emotion": "depression"},
+            {"key": "ADULT_MAINTENANCE_NEUTRAL", "name_ko": "성인 유지관리-안정", "stage": 5, "emotion": "neutral"}
+        ],
+        "special_situations": [
+            {"key": "FIRST_SESSION", "name_ko": "첫 세션", "description": "라포 형성 및 신뢰 구축"},
+            {"key": "RESISTANCE", "name_ko": "저항적 태도", "description": "비판단적 탐색 및 협력 강화"},
+            {"key": "BREAKTHROUGH", "name_ko": "돌파구 순간", "description": "통찰 명확화 및 변화 강화"}
+        ],
+        "fallback": [
+            {"key": "DEFAULT_GENERAL", "name_ko": "일반 상담", "description": "기본 심리상담 프롬프트"}
+        ]
+    }
+
+    total = (len(prompts["crisis"]) +
+             len(prompts["teen_prompts"]) +
+             len(prompts["adult_prompts"]) +
+             len(prompts["special_situations"]) +
+             len(prompts["fallback"]))
+
+    return {
+        "prompts": prompts,
+        "total_count": total,
+        "categories": {
+            "crisis": 1,
+            "teen": len(prompts["teen_prompts"]),
+            "adult": len(prompts["adult_prompts"]),
+            "special": len(prompts["special_situations"]),
+            "fallback": 1
         }
     }
