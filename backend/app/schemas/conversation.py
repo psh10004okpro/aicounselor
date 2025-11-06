@@ -76,3 +76,76 @@ class StreamChunk(BaseModel):
     done: bool = False
     conversation_id: Optional[UUID4] = None
     crisis_detected: bool = False
+
+
+# ============================================================================
+# New schemas for conversation management API
+# ============================================================================
+
+class ConversationListItem(BaseModel):
+    """Schema for conversation list item (summary view)"""
+
+    id: UUID4
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    status: str
+    crisis_detected: bool
+    crisis_severity: int
+    message_count: int = 0
+    last_message_preview: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationListResponse(BaseModel):
+    """Schema for paginated conversation list response"""
+
+    conversations: List[ConversationListItem]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
+class ConversationDetailResponse(BaseModel):
+    """Schema for detailed conversation view"""
+
+    id: UUID4
+    user_id: UUID4
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    status: str
+    crisis_detected: bool
+    crisis_severity: int
+    crisis_keywords_found: Optional[List[str]] = None
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: datetime
+    messages: List[MessageResponse] = []
+    message_count: int
+
+    class Config:
+        from_attributes = True
+
+
+class ConversationUpdateRequest(BaseModel):
+    """Schema for updating conversation"""
+
+    title: Optional[str] = Field(None, max_length=255)
+    summary: Optional[str] = Field(None, max_length=1000)
+    status: Optional[str] = Field(None, pattern="^(active|archived|deleted)$")
+
+
+class MessageListResponse(BaseModel):
+    """Schema for paginated message list"""
+
+    messages: List[MessageResponse]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+    conversation_id: UUID4

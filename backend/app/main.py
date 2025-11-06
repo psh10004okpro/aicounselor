@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.redis import redis_manager
 from app.services.cache_service import CacheService
-from app.api import chat, auth, cbt_stages, crisis_assessment, age_counseling, dynamic_prompts, realtime_analysis, alerts
+from app.api import chat, auth, cbt_stages, crisis_assessment, age_counseling, dynamic_prompts, realtime_analysis, alerts, conversations, users
 from middleware.security import (
     SecurityHeadersMiddleware,
     SQLInjectionProtectionMiddleware,
@@ -122,6 +122,8 @@ async def root():
 # Include routers
 app.include_router(auth.router)
 app.include_router(chat.router)
+app.include_router(conversations.router)  # NEW: Conversation management
+app.include_router(users.router)  # NEW: User profile management
 app.include_router(cbt_stages.router)
 app.include_router(crisis_assessment.router)
 app.include_router(age_counseling.router)
