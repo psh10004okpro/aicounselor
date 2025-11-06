@@ -13,9 +13,8 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from enum import Enum
 
-from openai import AsyncOpenAI
-
 from app.core.config import settings
+from app.services.openai_client import OpenAIClientFactory
 
 
 class RiskLevel(str, Enum):
@@ -375,7 +374,7 @@ class EnhancedCrisisDetectionSystem:
     }
 
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = OpenAIClientFactory.get_client()
         self.model = "gpt-4o-mini"
 
     async def detect(

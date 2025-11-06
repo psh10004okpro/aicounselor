@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 from enum import Enum
 
 from app.core.config import settings
+from app.services.openai_client import OpenAIClientFactory
 
 
 class CBTStageRecommendation(str, Enum):
@@ -38,7 +39,7 @@ class RealtimeMessageAnalyzer:
 
     def __init__(self, openai_client: Optional[AsyncOpenAI] = None):
         """Initialize with OpenAI client"""
-        self.client = openai_client or AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = openai_client or OpenAIClientFactory.get_client()
 
     async def analyze_message(
         self,

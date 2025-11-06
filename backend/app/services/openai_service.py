@@ -1,7 +1,6 @@
 """OpenAI API integration service"""
 
 from typing import List, AsyncGenerator, Optional
-from openai import AsyncOpenAI
 import hashlib
 
 from app.core.config import settings
@@ -10,6 +9,7 @@ from app.services.cache_service import CacheService
 from app.services.cbt_stage_service import CBTStageService
 from app.services.dynamic_prompt_service import DynamicPromptService
 from app.services.age_based_counseling import AgeGroup
+from app.services.openai_client import OpenAIClientFactory
 
 
 # Pricing per 1M tokens (USD) for GPT-4o-mini
@@ -21,7 +21,7 @@ class OpenAIService:
     """Service for OpenAI API interactions with semantic caching"""
 
     def __init__(self, cache_service: Optional[CacheService] = None):
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = OpenAIClientFactory.get_client()
         self.model = settings.OPENAI_MODEL
         self.cache_service = cache_service
 
