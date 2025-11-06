@@ -5,6 +5,7 @@ from app.models.conversation import Conversation, Message
 from app.models.memory import Memory
 from app.models.conversation_summary import ConversationSummary
 from app.models.crisis_log import CrisisLog
+from app.models.session import Session
 
 __all__ = [
     "User",
@@ -13,4 +14,5 @@ __all__ = [
     "Memory",
     "ConversationSummary",
     "CrisisLog",
+    "Session",
 ]
