@@ -95,7 +95,7 @@ async def get_my_profile(
     user = await get_current_user(session_token, db)
 
     # Extract metadata fields
-    metadata = user.metadata or {}
+    metadata = user.user_metadata or {}
     age = metadata.get("age")
     display_name = metadata.get("display_name")
     preferences = metadata.get("preferences")
@@ -151,7 +151,7 @@ async def update_my_profile(
     user = await get_current_user(session_token, db)
 
     # Get current metadata
-    metadata = user.metadata or {}
+    metadata = user.user_metadata or {}
 
     # Update metadata fields
     if request.age is not None:
@@ -167,7 +167,7 @@ async def update_my_profile(
         metadata["preferences"] = existing_prefs
 
     # Update user
-    user.metadata = metadata
+    user.user_metadata = metadata
     user.updated_at = datetime.utcnow()
     user.last_active = datetime.utcnow()
 

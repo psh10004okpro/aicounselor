@@ -423,7 +423,7 @@ async def login_user(
         )
 
     # Verify password
-    password_hash = user.metadata.get("password_hash")
+    password_hash = user.user_metadata.get("password_hash")
     if not password_hash or not encryption_service.verify_password(
         password, password_hash
     ):

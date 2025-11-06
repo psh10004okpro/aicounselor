@@ -41,7 +41,7 @@ class Memory(Base):
     )
 
     # Metadata
-    metadata = Column(JSONB, default={}, nullable=False)
+    memory_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(

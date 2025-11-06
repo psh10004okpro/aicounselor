@@ -30,7 +30,8 @@ class User(Base):
     data_retention_until = Column(DateTime(timezone=True), nullable=True)
 
     # Metadata (user preferences, settings)
-    metadata = Column(JSONB, default={}, nullable=False)
+    # Using user_metadata to avoid SQLAlchemy reserved keyword 'metadata'
+    user_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(

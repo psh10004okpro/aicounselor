@@ -32,7 +32,7 @@ class Conversation(Base):
     crisis_timestamp = Column(DateTime(timezone=True), nullable=True)
 
     # Metadata
-    metadata = Column(JSONB, default={}, nullable=False)
+    conv_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(
@@ -100,7 +100,7 @@ class Message(Base):
     detected_keywords = Column(JSONB, nullable=True)
 
     # Metadata
-    metadata = Column(JSONB, default={}, nullable=False)
+    conv_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(

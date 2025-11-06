@@ -39,7 +39,7 @@ class Session(Base):
     crisis_level = Column(Integer, default=0, nullable=False)  # Highest crisis level during session
 
     # Metadata
-    metadata = Column(JSONB, default={}, nullable=False)
+    session_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(

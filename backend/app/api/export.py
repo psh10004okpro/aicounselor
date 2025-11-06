@@ -29,6 +29,10 @@ from app.schemas.export import (
     AllDataExportRequest,
     ExportResponse,
 )
+from app.utils.pdf_generator import (
+    generate_conversation_pdf,
+    generate_progress_report_pdf,
+)
 
 
 router = APIRouter(prefix="/export", tags=["export"])
@@ -93,41 +97,7 @@ def generate_conversation_json(conversation: Conversation, messages: list, metad
     }
 
 
-def generate_conversation_pdf_placeholder(data: dict) -> bytes:
-    """
-    Generate PDF export of conversation
-
-    TODO: Implement PDF generation using reportlab or weasyprint
-
-    Required dependencies:
-    - pip install reportlab
-    OR
-    - pip install weasyprint
-
-    Implementation outline:
-    1. Create PDF document
-    2. Add header with conversation title and date
-    3. Format messages with proper styling
-    4. Add metadata section
-    5. Include statistics
-    6. Return PDF bytes
-    """
-    # Placeholder: Return JSON as text for now
-    # In production, this should generate actual PDF
-    pdf_content = f"""
-    CONVERSATION EXPORT (PDF)
-    =========================
-
-    Title: {data['conversation']['title']}
-    Date: {data['export_info']['export_date']}
-
-    Messages: {data['statistics']['total_messages']}
-
-    [PDF generation requires reportlab or weasyprint library]
-
-    For now, please use JSON format for full export.
-    """
-    return pdf_content.encode('utf-8')
+# PDF generation functions are now imported from pdf_generator module
 
 
 # ============================================================================
@@ -224,8 +194,8 @@ async def export_conversation(
             }
         )
     else:  # PDF
-        # Generate PDF (placeholder for now)
-        pdf_content = generate_conversation_pdf_placeholder(export_data)
+        # Generate PDF using ReportLab
+        pdf_content = generate_conversation_pdf(export_data)
 
         return StreamingResponse(
             io.BytesIO(pdf_content),
@@ -376,18 +346,8 @@ async def export_progress_report(
             }
         )
     else:  # PDF
-        # Placeholder PDF generation
-        pdf_content = f"""
-        PROGRESS REPORT
-        ===============
-
-        Generated: {report_data['report_info']['generated_at']}
-        Date Range: {date_from.strftime('%Y-%m-%d')} to {date_to.strftime('%Y-%m-%d')}
-
-        [PDF generation requires reportlab or weasyprint library]
-
-        For now, please use JSON format for full export.
-        """.encode('utf-8')
+        # Generate PDF using ReportLab
+        pdf_content = generate_progress_report_pdf(report_data)
 
         return StreamingResponse(
             io.BytesIO(pdf_content),
@@ -456,7 +416,7 @@ async def export_all_data(
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat(),
             "last_active": user.last_active.isoformat(),
-            "metadata": user.metadata,
+            "metadata": user.user_metadata,
         }
     }
 

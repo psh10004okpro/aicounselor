@@ -41,7 +41,7 @@ class ConversationSummary(Base):
     embedding = Column(Vector(1536), nullable=True)
 
     # Metadata
-    metadata = Column(JSONB, default={}, nullable=False)
+    summary_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(

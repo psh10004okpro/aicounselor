@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aicounselor_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: aicounselor
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aicounselor_network
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: aicounselor_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aicounselor_network
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aicounselor_backend
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/aicounselor
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-here-minimum-32-characters}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - OPENAI_MODEL=gpt-4o-mini
+      - OPENAI_MAX_TOKENS=1000
+      - OPENAI_TEMPERATURE=0.7
+      - MAX_CONTEXT_MESSAGES=20
+      - VECTOR_SEARCH_TOP_K=5
+      - CRISIS_KEYWORDS_THRESHOLD=3
+      - RATE_LIMIT_PER_MINUTE=60
+      - RATE_LIMIT_PER_HOUR=500
+      - ENABLE_ENCRYPTION=true
+      - DATA_RETENTION_DAYS=90
+      - ENABLE_AUDIT_LOG=true
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - aicounselor_network
+    restart: unless-stopped
+
+networks:
+  aicounselor_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

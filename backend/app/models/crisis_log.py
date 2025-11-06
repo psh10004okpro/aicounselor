@@ -48,7 +48,7 @@ class CrisisLog(Base):
     follow_up_notes = Column(Text, nullable=True)
 
     # Metadata
-    metadata = Column(JSONB, default={}, nullable=False)
+    crisis_metadata = Column("metadata", JSONB, default={}, nullable=False)
 
     # Timestamps
     created_at = Column(
